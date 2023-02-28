@@ -12,15 +12,19 @@
 #import "TXVoiceRoomCommonDef.h"
 #import "TRTCCloud.h"
 #import "VoiceRoomLocalized.h"
+#import "TUICore.h"
+#import "TUIDefine.h"
 
-static NSInteger CALL_MOVE_SEAT_LIMIT_TIME = 1000; //moveSeat接口限频，默认1s
+static NSInteger gTIME_CONNECT_TIMEOUT = 120;
 
-/// 移麦进入新麦位
-static NSString *MOVE_SEAT_STATUS_ENTER = @"voiceRoom_moveSeat_status_enter";
-/// 移麦离开原麦位
-static NSString *MOVE_SEAT_STATUS_LEAVE = @"voiceRoom_moveSeat_status_leave";
+static NSInteger gCALL_MOVE_SEAT_LIMIT_TIME = 1000; //`moveSeat` API call frequency limit, which is 1 second by default
 
-@interface TRTCVoiceRoom ()<VoiceRoomTRTCServiceDelegate, ITXRoomServiceDelegate>
+/// Move to a new seat
+static NSString *gMOVE_SEAT_STATUS_ENTER = @"voiceRoom_moveSeat_status_enter";
+/// Leave the original seat
+static NSString *gMOVE_SEAT_STATUS_LEAVE = @"voiceRoom_moveSeat_status_leave";
+
+@interface TRTCVoiceRoom ()<VoiceRoomTRTCServiceDelegate, ITXRoomServiceDelegate, TUINotificationProtocol>
 
 @property (nonatomic, assign) int mSDKAppID;
 
@@ -48,16 +52,19 @@ static NSString *MOVE_SEAT_STATUS_LEAVE = @"voiceRoom_moveSeat_status_leave";
 @property (nonatomic, readonly)VoiceRoomTRTCService *roomTRTCService;
 
 @property (nonatomic, assign)BOOL isSelfMute;
-// 上一次调用moveSeat时间
+
 @property (nonatomic, strong) NSDate *lastMoveSeatDate;
-// 移麦场景-用户麦位状态集合
+
 @property (nonatomic, strong) NSMutableSet *moveSeatStatus;
+
+/// Network connect service timer
+@property (strong, nonatomic) dispatch_source_t networkTimer;
 @end
 
 @implementation TRTCVoiceRoom
 
-static TRTCVoiceRoom *_instance;
-static dispatch_once_t onceToken;
+static TRTCVoiceRoom *gInstance;
+static dispatch_once_t gOnceToken;
 
 - (instancetype)init
 {
@@ -155,6 +162,7 @@ static dispatch_once_t onceToken;
     }];
     [self clearList];
     self.roomID = @"";
+    self.roomInfo = nil;
 }
 
 - (void)getAudienceList:(VoiceRoomUserListCallback _Nullable)callback {
@@ -183,10 +191,12 @@ static dispatch_once_t onceToken;
     }];
 }
 
-- (void)enterTRTCRoomInnerWithRoomId:(NSString *)roomId userId:(NSString *)userId userSign:(NSString *)userSig role:(NSInteger)role callback:(ActionCallback)callback {
+- (void)enterTRTCRoomInnerWithRoomId:(NSString *)roomId userId:(NSString *)userId
+ userSign:(NSString *)userSig role:(NSInteger)role callback:(ActionCallback)callback {
     TRTCLog(@"start enter trtc room.");
     @weakify(self)
-    [self.roomTRTCService enterRoomWithSdkAppId:self.mSDKAppID roomId:roomId userId:userId userSign:userSig role:role callback:^(int code, NSString * _Nonnull message) {
+    [self.roomTRTCService enterRoomWithSdkAppId:self.mSDKAppID roomId:roomId userId:userId
+     userSign:userSig role:role callback:^(int code, NSString * _Nonnull message) {
         @strongify(self)
         if (!self) {
             return;
@@ -199,19 +209,19 @@ static dispatch_once_t onceToken;
     }];
 }
 
-#pragma mark - TRTCVoiceRoom 实现
+#pragma mark - TRTCVoiceRoom Implementation
 + (instancetype)sharedInstance {
-    dispatch_once(&onceToken, ^{
-        _instance = [[TRTCVoiceRoom alloc] init];
-        [TXVoiceRoomService sharedInstance].delegate = _instance;
-        [VoiceRoomTRTCService sharedInstance].delegate = _instance;
+    dispatch_once(&gOnceToken, ^{
+        gInstance = [[TRTCVoiceRoom alloc] init];
+        [TXVoiceRoomService sharedInstance].delegate = gInstance;
+        [VoiceRoomTRTCService sharedInstance].delegate = gInstance;
     });
-    return _instance;
+    return gInstance;
 }
 
 + (void)destroySharedInstance {
-    onceToken = 0;
-    _instance = nil;
+    gOnceToken = 0;
+    gInstance = nil;
 }
 
 - (void)setDelegate:(id<TRTCVoiceRoomDelegate>)delegate{
@@ -229,7 +239,7 @@ static dispatch_once_t onceToken;
         if (!self) {
             return;
         }
-        TRTCLog(@"start login sdkAppID:%d userId:%@ app version:%@", sdkAppID, userId, APP_VERSION);
+        TRTCLog(@"start login sdkAppID:%d userId:%@ app version:%@", sdkAppID, userId, gAPP_VERSION);
         if (sdkAppID != 0 && userId && ![userId isEqualToString:@""] && userSig && ![userSig isEqualToString:@""]) {
             self.mSDKAppID = sdkAppID;
             self.userId = userId;
@@ -300,7 +310,7 @@ static dispatch_once_t onceToken;
         if (!self) {
             return;
         }
-        TRTCLog(@"create room roomID: %d app version: %@", roomID, APP_VERSION);
+        TRTCLog(@"create room roomID: %d app version: %@", roomID, gAPP_VERSION);
         [self.roomService getSelfInfo];
         if (roomID == 0) {
             TRTCLog(@"crate room fail. params invalid.");
@@ -343,7 +353,7 @@ static dispatch_once_t onceToken;
                 return;
             }
             if (code == 0) {
-                [self enterTRTCRoomInnerWithRoomId:self.roomID userId:self.userId userSign:self.userSig role:kTRTCRoleAnchorValue callback:callback];
+                [self enterTRTCRoomInnerWithRoomId:self.roomID userId:self.userId userSign:self.userSig role:KTRTCRoleAnchorValue callback:callback];
                 return;
             } else {
                 [self runOnDelegateQueue:^{
@@ -356,6 +366,7 @@ static dispatch_once_t onceToken;
                 callback(code, message);
             }
         }];
+        [self registerNetworkChangedEvent];
     }];
 }
 
@@ -378,7 +389,7 @@ static dispatch_once_t onceToken;
                 }
             }
         }];
-        // 在公开群（Public）、会议（Meeting）和直播群（AVChatRoom）中，群主是不可以退群的，群主只能调用 dismissGroup 解散群组。
+        // In a public (Public), meeting (Meeting), or audio-video group (AVChatRoom) group,the group owner cannot exit the group and can only call `dismissGroup` to delete it
         [self.roomService destroyRoom:^(int code, NSString * _Nonnull message) {
             @strongify(self)
             if (!self) {
@@ -391,6 +402,8 @@ static dispatch_once_t onceToken;
                 }];
             }
         }];
+        [self unRegisterNetworkChangedEvent];
+        [self stopNetworkTimer];
         [self clearList];
     }];
 }
@@ -404,8 +417,9 @@ static dispatch_once_t onceToken;
         }
         [self clearList];
         self.roomID = [NSString stringWithFormat:@"%ld", (long)roomID];
-        TRTCLog(@"start enter room, room id is %ld app version: %@", (long)roomID, APP_VERSION);
-        [self enterTRTCRoomInnerWithRoomId:self.roomID userId:self.userId userSign:self.userSig role:kTRTCRoleAudienceValue callback:^(int code, NSString * _Nonnull message) {
+        TRTCLog(@"start enter room, room id is %ld app version: %@", (long)roomID, gAPP_VERSION);
+        [self enterTRTCRoomInnerWithRoomId:self.roomID userId:self.userId userSign:self.userSig
+         role:KTRTCRoleAudienceValue callback:^(int code, NSString * _Nonnull message) {
             @strongify(self)
             if (!self) {
                 return;
@@ -429,6 +443,7 @@ static dispatch_once_t onceToken;
                 }];
             }
         }];
+        [self registerNetworkChangedEvent];
     }];
 }
 
@@ -451,6 +466,8 @@ static dispatch_once_t onceToken;
         } else {
             [self exitRoomInternal:callback];
         }
+        [self unRegisterNetworkChangedEvent];
+        [self stopNetworkTimer];
     }];
 }
 
@@ -506,7 +523,8 @@ static dispatch_once_t onceToken;
             [self getAudienceList:callback];
             return;
         }
-        [self.roomService getUserInfo:userIDList callback:^(int code, NSString * _Nonnull message, NSArray<TXVoiceRoomUserInfo *> * _Nonnull userInfos) {
+        [self.roomService getUserInfo:userIDList callback:^(int code, NSString * _Nonnull
+         message, NSArray<TXVoiceRoomUserInfo *> * _Nonnull userInfos) {
             @strongify(self)
             if (!self) {
                 return;
@@ -564,16 +582,15 @@ static dispatch_once_t onceToken;
 
 - (NSInteger)moveSeat:(NSInteger)seatIndex callback:(ActionCallback)callback{
     if (self.lastMoveSeatDate) {
-        // 单位毫秒
         NSTimeInterval duration = [[NSDate date] timeIntervalSinceDate:self.lastMoveSeatDate] * 1000;
-        if (duration < CALL_MOVE_SEAT_LIMIT_TIME) {
+        if (duration < gCALL_MOVE_SEAT_LIMIT_TIME) {
             TRTCLog(@"move seat error: call limit %.2f", duration);
             [self runMainQueue:^{
                 if (callback) {
-                    callback(ERR_CALL_METHOD_LIMIT, [NSString stringWithFormat:@"move seat error: call limit %.2f", duration]);
+                    callback(gERR_CALL_METHOD_LIMIT, [NSString stringWithFormat:@"move seat error: call limit %.2f", duration]);
                 }
             }];
-            return ERR_CALL_METHOD_LIMIT;
+            return gERR_CALL_METHOD_LIMIT;
         }
     }
     self.lastMoveSeatDate = [NSDate date];
@@ -593,8 +610,8 @@ static dispatch_once_t onceToken;
         }
         self.moveSeatCallback = callback;
         [self.moveSeatStatus removeAllObjects];
-        [self.moveSeatStatus addObject:MOVE_SEAT_STATUS_ENTER];
-        [self.moveSeatStatus addObject:MOVE_SEAT_STATUS_LEAVE];
+        [self.moveSeatStatus addObject:gMOVE_SEAT_STATUS_ENTER];
+        [self.moveSeatStatus addObject:gMOVE_SEAT_STATUS_LEAVE];
         [self.roomService moveSeat:seatIndex callback:^(int code, NSString * _Nonnull message) {
             @strongify(self)
             if (code == 0) {
@@ -652,7 +669,7 @@ static dispatch_once_t onceToken;
         if ([self isOnSeatWithUserId:userId]) {
             [self runOnDelegateQueue:^{
                 if (callback) {
-                    callback(-1, VoiceRoomLocalize(@"Demo.TRTC.Salon.userisspeaker"));
+                    callback(-1, voiceRoomLocalize(@"Demo.TRTC.Salon.userisspeaker"));
                 }
             }];
             return;
@@ -787,7 +804,6 @@ static dispatch_once_t onceToken;
 }
 
 - (void)muteLocalAudio:(BOOL)mute{
-    // 更新当前用户静音状态
     self.isSelfMute = mute;
     @weakify(self)
     [self runMainQueue:^{
@@ -978,9 +994,92 @@ static dispatch_once_t onceToken;
        }];
 }
 
+#pragma mark - Network Listener
+- (void)registerNetworkChangedEvent {
+#ifdef TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+    [TUICore registerEvent:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+     subKey:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECTING object:self];
+    [TUICore registerEvent:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+     subKey:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECT_SUCCESS object:self];
+    [TUICore registerEvent:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+     subKey:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECT_FAILED object:self];
+#endif
+}
 
-#pragma mark - 身份切换
-/// 切换到观众
+- (void)unRegisterNetworkChangedEvent {
+#ifdef TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+    [TUICore unRegisterEvent:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+     subKey:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECTING object:self];
+    [TUICore unRegisterEvent:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+     subKey:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECT_SUCCESS object:self];
+    [TUICore unRegisterEvent:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+     subKey:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECT_FAILED object:self];
+#endif
+}
+
+#pragma mark - TUINotificationProtocol
+- (void)onNotifyEvent:(NSString *)key subKey:(NSString *)subKey object:(id)anObject param:(NSDictionary *)param {
+#ifdef TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED
+    if ([key isEqualToString:TUICore_NetworkConnection_EVENT_CONNECTION_STATE_CHANGED]) {
+        if ([subKey isEqualToString:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECTING]) {
+            [self startNetworkTimer];
+        }
+        if ([subKey isEqualToString:TUICore_NetworkConnection_EVENT_SUB_KEY_CONNECT_SUCCESS]) {
+            [self stopNetworkTimer];
+        }
+    }
+#endif
+}
+
+- (void)startNetworkTimer {
+    if (_networkTimer) {
+        return;
+    }
+    _networkTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(_networkTimer, dispatch_walltime(NULL, gTIME_CONNECT_TIMEOUT * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 0);
+    @weakify(self);
+    dispatch_source_set_event_handler(_networkTimer, ^{
+        @strongify(self)
+        if (!self) {
+            return;
+        }
+        [self stopNetworkTimer];
+        [self exitRoomByTimeout];
+    });
+    dispatch_resume(_networkTimer);
+}
+
+- (void)stopNetworkTimer {
+    if (_networkTimer) {
+        dispatch_cancel(_networkTimer);
+        _networkTimer = nil;
+    }
+}
+
+- (void)exitRoomByTimeout {
+    NSLog(@"connect service timeout, and will exit room.");
+    @weakify(self);
+    [self runOnDelegateQueue:^{
+        @strongify(self)
+        if (!self) {
+            return;
+        }
+        if (self.roomService.isOwner) {
+            [self destroyRoom:^(int code, NSString * _Nonnull message) {
+                
+            }];
+        } else {
+            [self exitRoom:^(int code, NSString * _Nonnull message) {
+                
+            }];
+        }
+        if (self.delegate && [self.delegate respondsToSelector:@selector(onError:message:)]) {
+            [self.delegate onError:gERR_CONNECT_SERVICE_TIMEOUT message:@"Connect to cloud service is time out"];
+        }
+    }];
+}
+
+#pragma mark - roleSwitch
 - (void)onSwitchToAudienceWithIndex:(NSInteger)index userInfo:(TXVoiceRoomUserInfo *)userInfo{
     @weakify(self)
     [self runOnDelegateQueue:^{
@@ -1009,7 +1108,7 @@ static dispatch_once_t onceToken;
                 return;
             }
             if (self.moveSeatCallback != nil) {
-                [self.moveSeatStatus removeObject:MOVE_SEAT_STATUS_LEAVE];
+                [self.moveSeatStatus removeObject:gMOVE_SEAT_STATUS_LEAVE];
                 if (self.moveSeatStatus.count == 0) {
                     self.moveSeatCallback(0, @"move seat success");
                     self.moveSeatCallback = nil;
@@ -1025,7 +1124,6 @@ static dispatch_once_t onceToken;
     }
 }
 
-/// 切换到主播
 - (void)onSwitchToAnchorWithIndex:(NSInteger)index userInfo:(TXVoiceRoomUserInfo *)userInfo{
     @weakify(self)
     [self runMainQueue:^{
@@ -1053,7 +1151,6 @@ static dispatch_once_t onceToken;
         }];
         BOOL isSelfEnterSeat = [userInfo.userId isEqualToString:self.userId];
         if (isSelfEnterSeat) {
-            // 是自己上线了, 切换角色
             self.takeSeatIndex = index;
             [self runOnDelegateQueue:^{
                 @strongify(self)
@@ -1061,14 +1158,12 @@ static dispatch_once_t onceToken;
                     return;
                 }
                 if (self.moveSeatCallback) {
-                    // 移麦场景
-                    [self.moveSeatStatus removeObject:MOVE_SEAT_STATUS_ENTER];
+                    [self.moveSeatStatus removeObject:gMOVE_SEAT_STATUS_ENTER];
                     if (self.moveSeatStatus.count == 0) {
                         self.moveSeatCallback(0, @"move seat success");
                         self.moveSeatCallback = nil;
                     }
                 } else if (self.enterSeatCallback){
-                    // 正常上麦
                     self.enterSeatCallback(0, @"enter seat success");
                     self.enterSeatCallback = nil;
                 }
@@ -1207,6 +1302,7 @@ static dispatch_once_t onceToken;
         room.coverUrl = roomInfo.cover;
         room.needRequest = roomInfo.needRequest == 1;
         room.roomName = roomInfo.roomName;
+        self.roomInfo = room;
         if ([self canDelegateResponseMethod:@selector(onRoomInfoChange:)]) {
             [self.delegate onRoomInfoChange:room];
         }
@@ -1278,14 +1374,10 @@ static dispatch_once_t onceToken;
         }
         BOOL isSelfEnterSeat = [userInfo.userId isEqualToString:self.userId];
         if (isSelfEnterSeat) {
-            // 当前用户
-            // 当前麦位的禁言状态
             BOOL seatMute = self.seatInfoList[index].mute;
             if (self.moveSeatStatus.count == 0) {
-                // 默认上麦场景
                 [self.roomTRTCService muteLocalAudio:seatMute];
                 if (seatMute == NO) {
-                    // 回调更新麦克风静音状态
                     if (self.delegate && [self.delegate respondsToSelector:@selector(onUserMicrophoneMute:mute:)]) {
                         [self.delegate onUserMicrophoneMute:userInfo.userId mute:NO];
                     }
@@ -1295,10 +1387,8 @@ static dispatch_once_t onceToken;
                     [self onSwitchToAnchorWithIndex:index userInfo:userInfo];
                 }];
             } else {
-                // 移麦场景
                 if (seatMute) {
                     [self.roomTRTCService muteLocalAudio:YES];
-                    // 回调更新麦克风静音状态
                     if (self.delegate && [self.delegate respondsToSelector:@selector(onUserMicrophoneMute:mute:)]) {
                         [self.delegate onUserMicrophoneMute:userInfo.userId mute:YES];
                     }
@@ -1306,7 +1396,6 @@ static dispatch_once_t onceToken;
                 [self onSwitchToAnchorWithIndex:index userInfo:userInfo];
             }
         } else {
-            // 非当前用户
             [self onSwitchToAnchorWithIndex:index userInfo:userInfo];
         }
     }];
@@ -1356,21 +1445,16 @@ static dispatch_once_t onceToken;
             return;
         }
         if ([self.userId isEqualToString:userInfo.userId]) {
-            // 当前用户
             if (self.moveSeatStatus.count == 0) {
-                // 正常下麦: 需要切换TRTC身份
                 [self.roomTRTCService switchToAudienceWithCallBack:^(int code, NSString * _Nonnull message) {
                     @strongify(self)
                     [self onSwitchToAudienceWithIndex:index userInfo:userInfo];
                 }];
-                // 重置本地静音状态
                 self.isSelfMute = NO;
             } else {
-                // 涉及移麦场景: TRTC不切换用户身份
                 [self onSwitchToAudienceWithIndex:index userInfo:userInfo];
             }
         } else {
-            // 非当前用户
             [self onSwitchToAudienceWithIndex:index userInfo:userInfo];
         }
     }];
@@ -1386,13 +1470,11 @@ static dispatch_once_t onceToken;
         if (self.takeSeatIndex == index) {
             if (isMute) {
                 [self.roomTRTCService muteLocalAudio:YES];
-                // 禁言状态，更新当前用户的静音状态
                 if ([self canDelegateResponseMethod:@selector(onUserMicrophoneMute:mute:)]) {
                     [self.delegate onUserMicrophoneMute:self.userId mute:YES];
                 }
             } else {
                 [self.roomTRTCService muteLocalAudio:self.isSelfMute];
-                // 非禁言状态，更新当前用户的静音状态
                 if ([self canDelegateResponseMethod:@selector(onUserMicrophoneMute:mute:)]) {
                     [self.delegate onUserMicrophoneMute:self.userId mute:self.isSelfMute];
                 }

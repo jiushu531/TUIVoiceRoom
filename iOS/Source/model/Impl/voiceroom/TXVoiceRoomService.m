@@ -13,10 +13,10 @@
 #import "txvoiceroomCommonDef.h"
 #import "VoiceRoomLocalized.h"
 #import "TRTCVoiceRoomDef.h"
+#import "TUILogin.h"
 
 @interface TXVoiceRoomService ()<V2TIMSDKListener, V2TIMSimpleMsgListener, V2TIMGroupListener, V2TIMSignalingListener>
 
-@property (nonatomic, assign) BOOL isInitIMSDK;
 @property (nonatomic, assign) BOOL isLogin;
 @property (nonatomic, assign) BOOL isEnterRoom;
 
@@ -25,6 +25,9 @@
 @property (nonatomic, strong) NSString *ownerUserId;
 @property (nonatomic, strong) TXRoomInfo *roomInfo;
 @property (nonatomic, strong) NSArray<TXSeatInfo *> *seatInfoList;
+@property (nonatomic, strong) NSMutableSet<NSString *> *offlineUsers;
+@property (nonatomic, getter=isOfflineKicking) BOOL offlineKicking;
+@property (nonatomic, strong) NSMutableDictionary *offlineKickedMap;
 @property (nonatomic, strong) NSString *selfUserName;
 
 @property (nonatomic, strong, readonly)V2TIMManager* imManager;
@@ -32,6 +35,14 @@
 @end
 
 @implementation TXVoiceRoomService
+
+- (instancetype)init {
+    if (self = [super init]) {
+        self.offlineUsers = [NSMutableSet set];
+        self.offlineKickedMap = [NSMutableDictionary dictionary];
+    }
+    return self;
+}
 
 + (instancetype)sharedInstance {
     static TXVoiceRoomService* instance = nil;
@@ -47,20 +58,9 @@
                    userId:(NSString *)userId
                   userSig:(NSString *)userSig
                  callback:(TXCallback)callback {
-    if (!self.isInitIMSDK) {
-        V2TIMSDKConfig *config = [[V2TIMSDKConfig alloc] init];
-        config.logLevel = V2TIM_LOG_ERROR;
-        self.isInitIMSDK = [self.imManager initSDK:sdkAppId config:config];
-        if (!self.isInitIMSDK) {
-            if (callback) {
-                callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"init im sdk error.");
-            }
-            return;
-        }
-    }
-    NSString *loggedUserId = [self.imManager getLoginUser];
+    NSString *loggedUserId = [TUILogin getUserID];
     if (loggedUserId && [loggedUserId isEqualToString:userId]) {
-        // 已经登陆了
+        // the user has been login.
         self.isLogin = YES;
         self.selfUserId = loggedUserId;
         if (callback) {
@@ -69,7 +69,7 @@
         return;
     }
     @weakify(self)
-    [self.imManager login:userId userSig:userSig succ:^{
+    [TUILogin login:sdkAppId userID:userId userSig:userSig succ:^{
         @strongify(self)
         if (!self) {
             return;
@@ -79,9 +79,9 @@
         if (callback) {
             callback(0, @"im login success.");
         }
-    } fail:^(int code, NSString *desc) {
+    } fail:^(int code, NSString *msg) {
         if (callback) {
-            callback(code, desc ?: @"im login error");
+            callback(code, msg ?: @"im login error");
         }
     }];
 }
@@ -117,20 +117,20 @@
 - (void)logout:(TXCallback)callback {
     if (!self.isLogin) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"start logout fail. not login yet");
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"start logout fail. not login yet");
         }
         return;
     }
     if (self.isEnterRoom) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"start logout fail. you are in room, please exit room before logout");
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"start logout fail. you are in room, please exit room before logout");
         }
         return;
     }
     self.isLogin = NO;
     self.selfUserId = @"";
     @weakify(self)
-    [self.imManager logout:^{
+    [TUILogin logout:^{
         @strongify(self)
         if (!self) {
             return;
@@ -138,9 +138,9 @@
         if (callback) {
             callback(0, @"im logout success");
         }
-    } fail:^(int code, NSString *desc) {
+    } fail:^(int code, NSString *msg) {
         if (callback) {
-            callback(code, desc);
+            callback(code, (msg ?: @"im logout error"));
         }
     }];
 }
@@ -148,7 +148,7 @@
 - (void)setSelfProfileWithUserName:(NSString *)userName avatarUrl:(NSString *)avatarUrl callback:(TXCallback _Nullable)callback{
     if (!self.isLogin) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"set profile fail, not login yet.");
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"set profile fail, not login yet.");
         }
         return;
     }
@@ -166,17 +166,18 @@
     }];
 }
 
-- (void)createRoomWithRoomId:(NSString *)roomId
-                    roomName:(NSString *)roomName coverUrl:(NSString *)coverUrl needRequest:(BOOL)needRequest seatInfoList:(NSArray<TXSeatInfo *> *)seatInfoList callback:(TXCallback)callback {
+- (void)createRoomWithRoomId:(NSString *)roomId roomName:(NSString *)roomName coverUrl:(NSString
+ *)coverUrl needRequest:(BOOL)needRequest seatInfoList:(NSArray<TXSeatInfo *> *)seatInfoList
+ callback:(TXCallback)callback {
     if (!self.isLogin) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"im not login yet, create room fail");
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"im not login yet, create room fail");
         }
         return;
     }
     if (self.isEnterRoom) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"you have been in room");
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"you have been in room");
         }
         return;
     }
@@ -206,16 +207,14 @@
         TRTCLog(@"create room error: %d, msg: %@", code, desc);
         NSString *msg = desc ?: @"create room fiald";
         if (code == 10036) {
-            msg = LocalizeReplaceXX(VoiceRoomLocalize(@"Demo.TRTC.Buy.chatroom"), @"https://cloud.tencent.com/document/product/269/11673");
+            msg = localizeReplaceXX(voiceRoomLocalize(@"Demo.TRTC.Buy.chatroom"), @"https://cloud.tencent.com/document/product/269/11673");
         } else if (code == 10037) {
-            msg = LocalizeReplaceXX(VoiceRoomLocalize(@"Demo.TRTC.Buy.grouplimit"), @"https://cloud.tencent.com/document/product/269/11673");
+            msg = localizeReplaceXX(voiceRoomLocalize(@"Demo.TRTC.Buy.grouplimit"), @"https://cloud.tencent.com/document/product/269/11673");
         } else if (code == 10038) {
-            msg = LocalizeReplaceXX(VoiceRoomLocalize(@"Demo.TRTC.Buy.groupmemberlimit"), @"https://cloud.tencent.com/document/product/269/11673");
+            msg = localizeReplaceXX(voiceRoomLocalize(@"Demo.TRTC.Buy.groupmemberlimit"), @"https://cloud.tencent.com/document/product/269/11673");
         }
         
         if (code == 10025 || code == 10021) {
-            // 表明群主是自己，认为创建成功
-            // 群ID已被他人使用，走进房的逻辑
             [self setGroupInfoWithRoomId:roomId roomName:roomName coverUrl:coverUrl userName:self.selfUserName];
             [self.imManager joinGroup:roomId msg:@"" succ:^{
                 TRTCLog(@"gorup has benn created. join group success");
@@ -264,6 +263,8 @@
             [self unInitIMListener];
             [self cleanRoomStatus];
         } else {
+            [self unInitIMListener];
+            [self cleanRoomStatus];
             if (callback) {
                 callback(code, desc ?: @"destroy room failed");
             }
@@ -404,18 +405,18 @@
             return;
         }
         NSInteger sourceSeatIndex = [self.seatInfoList indexOfObject:sourceSeatInfo];
-        // 之前的麦位信息修改
         TXSeatInfo *sourceChangeInfo = [[TXSeatInfo alloc] init];
         sourceChangeInfo.status = kTXSeatStatusUnused;
         sourceChangeInfo.user = @"";
         sourceChangeInfo.mute = sourceSeatInfo.mute;
-        // 需要移动的麦位信息
         TXSeatInfo *targetChangeInfo = [[TXSeatInfo alloc] init];
         targetChangeInfo.status = kTXSeatStatusUsed;
         targetChangeInfo.user = self.selfUserId;
         targetChangeInfo.mute = targetSeatInfo.mute;
         
-        NSDictionary *dic = [TXVoiceRoomIMJsonHandle getMoveSeatInfoJsonStrWithSourceIndex:sourceSeatIndex sourceSeatInfo:sourceChangeInfo targetIndex:seatIndex targetSeatInfo:targetChangeInfo];
+        NSDictionary *dic = [TXVoiceRoomIMJsonHandle
+         getMoveSeatInfoJsonStrWithSourceIndex:sourceSeatIndex sourceSeatInfo:sourceChangeInfo
+         targetIndex:seatIndex targetSeatInfo:targetChangeInfo];
         [self modifyGroupAttrs:dic callback:callback];
     } else {
         if (callback) {
@@ -530,13 +531,13 @@
 - (void)getUserInfo:(NSArray<NSString *> *)userList callback:(TXUserListCallback)callback {
     if (!self.isEnterRoom) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"get user info list fail, not enter room yet", @[]);
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"get user info list fail, not enter room yet", @[]);
         }
         return;
     }
     if (!userList || userList.count == 0) {
         if (callback) {
-            callback(VOICE_ROOM_SERVICE_CODE_ERROR, @"get user info list fail, user id list is empty.", @[]);
+            callback(gVOICE_ROOM_SERVICE_CODE_ERROR, @"get user info list fail, user id list is empty.", @[]);
         }
         return;
     }
@@ -612,7 +613,8 @@
 }
 
 - (void)getAudienceList:(TXUserListCallback)callback {
-    [self.imManager getGroupMemberList:self.mRoomId filter:V2TIM_GROUP_MEMBER_FILTER_COMMON nextSeq:0 succ:^(uint64_t nextSeq, NSArray<V2TIMGroupMemberFullInfo *> *memberList) {
+    [self.imManager getGroupMemberList:self.mRoomId filter:V2TIM_GROUP_MEMBER_FILTER_COMMON
+     nextSeq:0 succ:^(uint64_t nextSeq, NSArray<V2TIMGroupMemberFullInfo *> *memberList) {
         if (memberList) {
             NSMutableArray *resultList = [[NSMutableArray alloc] initWithCapacity:2];
             [memberList enumerateObjectsUsingBlock:^(V2TIMGroupMemberFullInfo * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
@@ -679,14 +681,14 @@
 
 - (NSString *)sendInvitation:(NSString *)cmd userId:(NSString *)userId content:(NSString *)content callback:(TXCallback)callback {
     NSDictionary *dic = @{
-        VOICE_ROOM_KEY_CMD_VERSION:@(VOICE_ROOM_VALUE_CMD_VERSION),
-        VOICE_ROOM_KEY_CMD_BUSINESSID:VOICE_ROOM_VALUE_CMD_BUSINESSID,
-        VOICE_ROOM_KEY_CMD_PLATFORM:VOICE_ROOM_VALUE_CMD_PLATFORM,
-        VOICE_ROOM_KEY_CMD_EXTINFO:@"",
-        VOICE_ROOM_KEY_CMD_DATA:@{
-                VOICE_ROOM_KEY_CMD_ROOMID:@(self.mRoomId.intValue),
-                VOICE_ROOM_KEY_CMD_CMD:cmd,
-                VOICE_ROOM_KEY_CMD_SEATNUMBER:content,
+        gVOICE_ROOM_KEY_CMD_VERSION:@(gVOICE_ROOM_VALUE_CMD_VERSION),
+        gVOICE_ROOM_KEY_CMD_BUSINESSID:gVOICE_ROOM_VALUE_CMD_BUSINESSID,
+        gVOICE_ROOM_KEY_CMD_PLATFORM:gVOICE_ROOM_VALUE_CMD_PLATFORM,
+        gVOICE_ROOM_KEY_CMD_EXTINFO:@"",
+        gVOICE_ROOM_KEY_CMD_DATA:@{
+                gVOICE_ROOM_KEY_CMD_ROOMID:@(self.mRoomId.intValue),
+                gVOICE_ROOM_KEY_CMD_CMD:cmd,
+                gVOICE_ROOM_KEY_CMD_SEATNUMBER:content,
         },
     };
     NSString *jsonString = [dic mj_JSONString];
@@ -706,9 +708,9 @@
 - (void)acceptInvitation:(NSString *)identifier callback:(TXCallback)callback {
     TRTCLog(@"accept %@", identifier);
     NSDictionary *dic = @{
-        VOICE_ROOM_KEY_CMD_VERSION:@(VOICE_ROOM_VALUE_CMD_VERSION),
-        VOICE_ROOM_KEY_CMD_BUSINESSID:VOICE_ROOM_VALUE_CMD_BUSINESSID,
-        VOICE_ROOM_KEY_CMD_PLATFORM:VOICE_ROOM_VALUE_CMD_PLATFORM,
+        gVOICE_ROOM_KEY_CMD_VERSION:@(gVOICE_ROOM_VALUE_CMD_VERSION),
+        gVOICE_ROOM_KEY_CMD_BUSINESSID:gVOICE_ROOM_VALUE_CMD_BUSINESSID,
+        gVOICE_ROOM_KEY_CMD_PLATFORM:gVOICE_ROOM_VALUE_CMD_PLATFORM,
     };
     NSString *jsonString = [dic mj_JSONString];
     [self.imManager accept:identifier data:jsonString succ:^{
@@ -727,9 +729,9 @@
 - (void)rejectInvitaiton:(NSString *)identifier callback:(TXCallback)callback {
     TRTCLog(@"reject %@", identifier);
     NSDictionary *dic = @{
-        VOICE_ROOM_KEY_CMD_VERSION:@(VOICE_ROOM_VALUE_CMD_VERSION),
-        VOICE_ROOM_KEY_CMD_BUSINESSID:VOICE_ROOM_VALUE_CMD_BUSINESSID,
-        VOICE_ROOM_KEY_CMD_PLATFORM:VOICE_ROOM_VALUE_CMD_PLATFORM,
+        gVOICE_ROOM_KEY_CMD_VERSION:@(gVOICE_ROOM_VALUE_CMD_VERSION),
+        gVOICE_ROOM_KEY_CMD_BUSINESSID:gVOICE_ROOM_VALUE_CMD_BUSINESSID,
+        gVOICE_ROOM_KEY_CMD_PLATFORM:gVOICE_ROOM_VALUE_CMD_PLATFORM,
     };
     NSString *jsonString = [dic mj_JSONString];
     [self.imManager reject:identifier data:jsonString succ:^{
@@ -748,9 +750,9 @@
 - (void)cancelInvitation:(NSString *)identifier callback:(TXCallback)callback {
     TRTCLog(@"cancel %@", identifier);
     NSDictionary *dic = @{
-        VOICE_ROOM_KEY_CMD_VERSION:@(VOICE_ROOM_VALUE_CMD_VERSION),
-        VOICE_ROOM_KEY_CMD_BUSINESSID:VOICE_ROOM_VALUE_CMD_BUSINESSID,
-        VOICE_ROOM_KEY_CMD_PLATFORM:VOICE_ROOM_VALUE_CMD_PLATFORM,
+        gVOICE_ROOM_KEY_CMD_VERSION:@(gVOICE_ROOM_VALUE_CMD_VERSION),
+        gVOICE_ROOM_KEY_CMD_BUSINESSID:gVOICE_ROOM_VALUE_CMD_BUSINESSID,
+        gVOICE_ROOM_KEY_CMD_PLATFORM:gVOICE_ROOM_VALUE_CMD_PLATFORM,
     };
     NSString *jsonString = [dic mj_JSONString];
     [self.imManager cancel:identifier data:jsonString succ:^{
@@ -768,14 +770,76 @@
 
 - (NSString *)getInvitationBaseData {
     NSDictionary *dic = @{
-        VOICE_ROOM_KEY_CMD_VERSION:@(VOICE_ROOM_VALUE_CMD_VERSION),
-        VOICE_ROOM_KEY_CMD_BUSINESSID:VOICE_ROOM_VALUE_CMD_BUSINESSID,
-        VOICE_ROOM_KEY_CMD_PLATFORM:VOICE_ROOM_VALUE_CMD_PLATFORM,
+        gVOICE_ROOM_KEY_CMD_VERSION:@(gVOICE_ROOM_VALUE_CMD_VERSION),
+        gVOICE_ROOM_KEY_CMD_BUSINESSID:gVOICE_ROOM_VALUE_CMD_BUSINESSID,
+        gVOICE_ROOM_KEY_CMD_PLATFORM:gVOICE_ROOM_VALUE_CMD_PLATFORM,
     };
     return [dic mj_JSONString];
 }
 
+- (NSInteger)getSeatIndexWithUserId:(NSString *)userId {
+    NSInteger seatIndex = -1;
+    if (!userId || ![userId isKindOfClass:[NSString class]] || userId.length == 0) {
+        return seatIndex;
+    }
+    for (NSInteger index = 0; index < self.seatInfoList.count; index++) {
+        TXSeatInfo *seatInfo = self.seatInfoList[index];
+        if (seatInfo.user && [seatInfo.user isEqualToString: userId]) {
+            seatIndex = index;
+            break;
+        }
+    }
+    return seatIndex;
+}
+
+- (void)handleKickOfflineUser {
+    if (self.isOfflineKicking || self.offlineUsers.count == 0) {
+        return;
+    }
+    self.offlineKicking = YES;
+    NSString *kickedUserId = _offlineUsers.allObjects.firstObject;
+    [self.offlineUsers removeObject:kickedUserId];
+    NSInteger kickedSeatIndex = [self getSeatIndexWithUserId:kickedUserId];
+    if (kickedSeatIndex == -1) {
+        self.offlineKicking = NO;
+        [self handleKickOfflineUser];
+        return;
+    }
+    __weak typeof(self) weakSelf = self;
+    [self kickSeat:kickedSeatIndex callback:^(int code, NSString * _Nonnull message) {
+        if (!weakSelf) {
+            return;
+        }
+        TRTCLog(@"kickSeat offlineUser userId: %@ seatIndex:%d message:%@", kickedUserId, kickedSeatIndex, message);
+        if (code == 0) {
+            [weakSelf.offlineKickedMap setObject:kickedUserId forKey:@(kickedSeatIndex)];
+        } else {
+            weakSelf.offlineKicking = NO;
+            [weakSelf handleKickOfflineUser];
+        }
+    }];
+}
+
 #pragma mark - V2TIMSDKListener
+- (void)onUserStatusChanged:(NSArray<V2TIMUserStatus *> *)userStatusList {
+    if (!userStatusList || userStatusList.count == 0) {
+        TRTCLog(@"onUserStatusChanged, userStatusList is null");
+        return;
+    }
+    for (V2TIMUserStatus *userStatus in userStatusList) {
+        TRTCLog(@"onUserStatusChanged, userId: %@ status: %d", userStatus.userID, userStatus.statusType);
+        if (userStatus.statusType == V2TIM_USER_STATUS_OFFLINE) {
+            if (![self.offlineUsers containsObject:userStatus.userID]) {
+                [self.offlineUsers addObject:userStatus.userID];
+            }
+            [self handleKickOfflineUser];
+        } else if (userStatus.statusType == V2TIM_USER_STATUS_ONLINE) {
+            if ([self.offlineUsers containsObject:userStatus.userID]) {
+                [self.offlineUsers removeObject:userStatus.userID];
+            }
+        }
+    }
+}
 
 #pragma mark - V2TIMSimpleMsgListener
 - (void)onRecvC2CTextMessage:(NSString *)msgID sender:(V2TIMUserInfo *)info text:(NSString *)text {
@@ -810,12 +874,12 @@
     }
     NSString* jsonString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     NSDictionary* dic = [jsonString mj_JSONObject];
-    NSString *version = [dic objectForKey:VOICE_ROOM_KEY_ATTR_VERSION];
-    if (!version || ![version isEqualToString:VOICE_ROOM_VALUE_ATTR_VERSION]) {
+    NSString *version = [dic objectForKey:gVOICE_ROOM_KEY_ATTR_VERSION];
+    if (!version || ![version isEqualToString:gVOICE_ROOM_VALUE_ATTR_VERSION]) {
         TRTCLog(@"protocol version is not match, ignore msg");
         return;
     }
-    NSNumber* action = [dic objectForKey:VOICE_ROOM_KEY_CMD_ACTION];
+    NSNumber* action = [dic objectForKey:gVOICE_ROOM_KEY_CMD_ACTION];
     if (!action) {
         TRTCLog(@"action can't parse from data");
         return;
@@ -885,6 +949,7 @@
     if (![groupID isEqualToString:self.mRoomId]) {
         return;
     }
+    [self unInitIMListener];
     [self cleanRoomStatus];
     if ([self canDelegateResponseMethod:@selector(onRoomDestroyWithRoomId:)]) {
         [self.delegate onRoomDestroyWithRoomId:groupID];
@@ -920,10 +985,7 @@
 }
 
 
-#pragma mark - 群属性麦位更新
-/// 群属性回调麦位信息更新
-/// @param attributes 群属性信息
-/// @param seatSize 麦位数量
+#pragma mark - GroupAttributesChange
 - (void)onSeatAttrMapChangedWithAttributes:(NSDictionary<NSString *, NSString *> *)attributes seatSize:(NSInteger)seatSize{
     
     // 解析 seatInfo
@@ -946,7 +1008,6 @@
                     }
                     break;
                 case kTXSeatStatusUsed:
-                    // 正常上麦
                     [self onSeatTakeWithIndex:i user:new.user];
                     break;
                 case kTXSeatStatusClose:
@@ -962,8 +1023,6 @@
     }
 }
 
-/// 更新本地群属性信息
-/// @param callback 回调
 - (void)getGroupAttrsWithCallBack:(TXCallback _Nullable)callback{
     @weakify(self)
     [self.imManager getGroupAttributes:self.mRoomId keys:nil succ:^(NSMutableDictionary<NSString *,NSString *> *groupAttributeList) {
@@ -978,10 +1037,9 @@
             return;
         }
         TRTCLog(@"get group attrs success, now update data");
-        // 解析roomInfo
         TXRoomInfo* roomInfo = [TXVoiceRoomIMJsonHandle getRoomInfoFromAttr:groupAttributeList];
         if (roomInfo) {
-            roomInfo.memberCount = -1; // 当前房间的MemberCount无法从这个接口正确获取。
+            roomInfo.memberCount = -1;
             self.roomInfo = roomInfo;
         } else {
             TRTCLog(@"init room info is empty, enter room failed.");
@@ -993,11 +1051,9 @@
 
         self.isEnterRoom = YES;
         self.ownerUserId = self.roomInfo.ownerId;
-        // 回调 更新roomInfo
         if ([self canDelegateResponseMethod:@selector(onRoomInfoChange:)]) {
             [self.delegate onRoomInfoChange:self.roomInfo];
         }
-        // 更新麦位信息
         [self onSeatAttrMapChangedWithAttributes:groupAttributeList seatSize:self.roomInfo.seatSize];
         if (callback) {
             callback(0, @"enter room success");
@@ -1011,27 +1067,28 @@
 }
 
 #pragma mark - V2TIMSignalingListener
-- (void)onReceiveNewInvitation:(NSString *)inviteID inviter:(NSString *)inviter groupID:(NSString *)groupID inviteeList:(NSArray<NSString *> *)inviteeList data:(NSString *)data{
+- (void)onReceiveNewInvitation:(NSString *)inviteID inviter:(NSString *)inviter groupID:(NSString
+ *)groupID inviteeList:(NSArray<NSString *> *)inviteeList data:(NSString *)data{
     NSDictionary *dic = [data mj_JSONObject];
     if (![dic isKindOfClass:[NSDictionary class]]) {
         TRTCLog(@"parse data error");
         return;
     }
-    NSInteger version = [[dic objectForKey:VOICE_ROOM_KEY_CMD_VERSION] integerValue];
-    if (version < VOICE_ROOM_VALUE_CMD_BASIC_VERSION) {
+    NSInteger version = [[dic objectForKey:gVOICE_ROOM_KEY_CMD_VERSION] integerValue];
+    if (version < gVOICE_ROOM_VALUE_CMD_BASIC_VERSION) {
         TRTCLog(@"protocol version is nil or not match, ignore c2c msg");
         return;
     }
-    NSString *businessID = [dic objectForKey:VOICE_ROOM_KEY_CMD_BUSINESSID];
-    if (!businessID || ![businessID isEqualToString:VOICE_ROOM_VALUE_CMD_BUSINESSID]) {
+    NSString *businessID = [dic objectForKey:gVOICE_ROOM_KEY_CMD_BUSINESSID];
+    if (!businessID || ![businessID isEqualToString:gVOICE_ROOM_VALUE_CMD_BUSINESSID]) {
         TRTCLog(@"bussiness id error");
         return;
     }
     
-    NSDictionary *cmdData = [dic objectForKey:VOICE_ROOM_KEY_CMD_DATA];
-    NSString *cmd = [cmdData objectForKey:VOICE_ROOM_KEY_CMD_CMD];
-    NSString *content = [cmdData objectForKey:VOICE_ROOM_KEY_CMD_SEATNUMBER];
-    int roomID = [[cmdData objectForKey:VOICE_ROOM_KEY_CMD_ROOMID] intValue];
+    NSDictionary *cmdData = [dic objectForKey:gVOICE_ROOM_KEY_CMD_DATA];
+    NSString *cmd = [cmdData objectForKey:gVOICE_ROOM_KEY_CMD_CMD];
+    NSString *content = [cmdData objectForKey:gVOICE_ROOM_KEY_CMD_SEATNUMBER];
+    int roomID = [[cmdData objectForKey:gVOICE_ROOM_KEY_CMD_ROOMID] intValue];
     if ([self.mRoomId intValue] != roomID) {
         TRTCLog(@"room id is not right");
         return;
@@ -1072,6 +1129,9 @@
     self.isEnterRoom = NO;
     self.mRoomId = @"";
     self.ownerUserId = @"";
+    [self.offlineUsers removeAllObjects];
+    [self.offlineKickedMap removeAllObjects];
+    self.offlineKicking = NO;
 }
 
 - (BOOL)canDelegateResponseMethod:(SEL)method {
@@ -1097,6 +1157,13 @@
             [self.delegate onSeatTakeWithIndex:index userInfo:userInfo];
         }
     }];
+    if ([self isOwner]) {
+        [self.imManager subscribeUserStatus:@[userId] succ:^{
+            TRTCLog(@"subscribeUserStatus success userId %@", userId);
+        } fail:^(int code, NSString *desc) {
+            TRTCLog(@"subscribeUserStatus failed, code: %d message:%@ userId %@", code, desc, userId);
+        }];
+    }
 }
 
 - (void)onSeatLeaveWithIndex:(NSInteger)index user:(NSString *)userId {
@@ -1118,6 +1185,19 @@
             [self.delegate onSeatLeaveWithIndex:index userInfo:userInfo];
         }
     }];
+    if ([self isOwner]) {
+        [self.imManager unsubscribeUserStatus:@[userId] succ:^{
+            TRTCLog(@"unsubscribeUserStatus success userId %@", userId);
+        } fail:^(int code, NSString *desc) {
+            TRTCLog(@"unsubscribeUserStatus failed, code: %d message:%@ userId %@", code, desc, userId);
+        }];
+    }
+    // handle offlineUsers status on onSeatLeaveWithIndex
+    NSString *kickedUserId = self.offlineKickedMap[@(index)];
+    if (kickedUserId && [kickedUserId isKindOfClass:[NSString class]] && kickedUserId.length > 0) {
+        self.offlineKicking = NO;
+        [self handleKickOfflineUser];
+    }
 }
 
 - (void)onSeatcloseWithIndex:(NSInteger)index isClose:(BOOL)isClose {
@@ -1135,8 +1215,8 @@
 }
 
 - (void)initImListener {
-    [self.imManager setGroupListener:self];
-    // 设置前先remove下，防止在单例的情况下重复设置
+    [self.imManager addGroupListener:self];
+    [self.imManager addIMSDKListener:self];
     [self.imManager removeSignalingListener:self];
     [self.imManager removeSimpleMsgListener:self];
     [self.imManager addSignalingListener:self];
@@ -1144,9 +1224,12 @@
 }
 
 - (void)unInitIMListener {
-    [self.imManager setGroupListener:nil];
+    [self.imManager removeIMSDKListener:self];
+    [self.imManager removeGroupListener:self];
     [self.imManager removeSignalingListener:self];
     [self.imManager removeSimpleMsgListener:self];
+    // 取消所有在线用户订阅
+    [self.imManager unsubscribeUserStatus:@[] succ:nil fail:nil];
 }
 
 - (void)onCreateSuccess:(TXCallback _Nullable)callback {
@@ -1164,7 +1247,7 @@
     } fail:^(int code, NSString *desc) {
         @strongify(self)
         if (!self) { return; }
-        if (code == ERR_SVR_GROUP_ATTRIBUTE_WRITE_CONFLICT) {
+        if (code == gERR_SVR_GROUP_ATTRIBUTE_WRITE_CONFLICT) {
             TRTCLog(@"modify group attrs conflict, now get group attrs");
             [self getGroupAttrsWithCallBack:^(int code, NSString * _Nonnull message) {
                 TRTCLog(@"gorup has benn created. join group success");
@@ -1212,11 +1295,10 @@
         if (!groupAttributeList) {
             return;
         }
-        // 解析 roomInfo
         TXRoomInfo* roomInfo = [TXVoiceRoomIMJsonHandle getRoomInfoFromAttr:groupAttributeList];
         if (roomInfo) {
             roomInfo.roomId = roomId;
-            roomInfo.memberCount = -1; // 当前房间的MemberCount无法从这个接口正确获取。
+            roomInfo.memberCount = -1;
             self.roomInfo = roomInfo;
         } else {
             TRTCLog(@"group room info is empty, enter room failed.");
@@ -1232,7 +1314,6 @@
         if ([self canDelegateResponseMethod:@selector(onRoomInfoChange:)]) {
             [self.delegate onRoomInfoChange:self.roomInfo];
         }
-        // 解析 seatInfo
         self.seatInfoList = [TXVoiceRoomIMJsonHandle getSeatListFromAttr:groupAttributeList seatSize:self.roomInfo.seatSize];
         if ([self canDelegateResponseMethod:@selector(onSeatInfoListChange:)]) {
             [self.delegate onSeatInfoListChange:self.seatInfoList];
@@ -1260,7 +1341,7 @@
         }
     } fail:^(int code, NSString *desc) {
         TRTCLog(@"modify group attrs failed");
-        if (code == ERR_SVR_GROUP_ATTRIBUTE_WRITE_CONFLICT) {
+        if (code == gERR_SVR_GROUP_ATTRIBUTE_WRITE_CONFLICT) {
             @strongify(self)
             TRTCLog(@"modify group attrs conflict, now get group attrs");
             [self getGroupAttrsWithCallBack:nil];

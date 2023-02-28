@@ -36,14 +36,17 @@ class TRTCCreateVoiceRoomRootView: UIView {
         let textView = UITextView(frame: .zero)
         textView.font = UIFont(name: "PingFangSC-Regular", size: 16)
         textView.textContainerInset = UIEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        textView.text = LocalizeReplaceXX(.defaultCreateText, viewModel.userName).subString(toByteLength: createRoomTextMaxByteLength)
+        textView.text = localizeReplaceXX(.defaultCreateText, viewModel.userName).subString(toByteLength: createRoomTextMaxByteLength)
         textView.textColor = .black
         textView.layer.cornerRadius = 20
         textView.backgroundColor = UIColor(hex: "F4F5F9")
+#if RTCube_APPSTORE
+        textView.isUserInteractionEnabled = false
+#endif
         return textView
     }()
     
-    /// 上麦需要房主同意 - 提示文本
+    /// Whether the room owner's permission is required for users to speak
     private lazy var needRequestTipLabel:UILabel = {
         let label = UILabel(frame: .zero)
         label.textColor = .black
@@ -51,7 +54,7 @@ class TRTCCreateVoiceRoomRootView: UIView {
         label.text = .needRequestText
         return label
     }()
-    /// 上麦需要房主同意 - switch状态开关
+    /// Whether the room owner's permission is required for users to speak
     private lazy var needRequestSwitch:UISwitch = {
         let view = UISwitch()
         view.setOn(true, animated: false)
@@ -87,7 +90,8 @@ class TRTCCreateVoiceRoomRootView: UIView {
         self.viewModel = viewModel
         super.init(frame: frame)
         bindInteraction()
-        NotificationCenter.default.addObserver(self, selector: #selector(keyboardFrameChange(noti:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardFrameChange(noti:)),
+         name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
     }
     
     deinit {
@@ -215,7 +219,7 @@ class TRTCCreateVoiceRoomRootView: UIView {
     
     private func enterRoom() {
         if textView.text == String.placeholderTitleText {
-            viewModel.roomName = LocalizeReplaceXX(.defaultCreateText, viewModel.userName)
+            viewModel.roomName = localizeReplaceXX(.defaultCreateText, viewModel.userName)
         }
         else {
             viewModel.roomName = textView.text
@@ -274,12 +278,6 @@ extension UITextView {
     }
 }
 extension UIView {
-    /// 切部分圆角
-    ///
-    /// - Parameters:
-    ///   - rect: 传入View的Rect
-    ///   - byRoundingCorners: 裁剪位置
-    ///   - cornerRadii: 裁剪半径
     public func roundedRect(rect:CGRect, byRoundingCorners: UIRectCorner, cornerRadii: CGSize) {
         let maskPath = UIBezierPath.init(roundedRect: rect, byRoundingCorners: byRoundingCorners, cornerRadii: cornerRadii)
         let maskLayer = CAShapeLayer.init()
@@ -288,9 +286,6 @@ extension UIView {
         self.layer.mask = maskLayer
     }
     
-    /// 切圆角
-    ///
-    /// - Parameter rect: 传入view的Rect
     public func roundedCircle(rect: CGRect) {
         roundedRect(rect: rect, byRoundingCorners: .allCorners, cornerRadii: CGSize(width: bounds.size.width / 2, height: bounds.size.height / 2))
     }
@@ -316,9 +311,9 @@ extension TRTCCreateVoiceRoomRootView : TRTCCreateVoiceRoomViewResponder {
 
 // MARK: - internationalization string
 fileprivate extension String {
-    static let titleText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.roomsubject")
-    static let placeholderTitleText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.enterroomsubject")
-    static let createText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.starttalking")
-    static let defaultCreateText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.xxxsroom")
-    static let needRequestText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.needrequesttip")
+    static let titleText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.roomsubject")
+    static let placeholderTitleText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.enterroomsubject")
+    static let createText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.starttalking")
+    static let defaultCreateText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.xxxsroom")
+    static let needRequestText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.needrequesttip")
 }

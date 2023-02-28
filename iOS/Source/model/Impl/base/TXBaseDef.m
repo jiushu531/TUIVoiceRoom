@@ -11,12 +11,11 @@
 
 @interface TRTCCloud (VoiceRoomLog)
 
-// 打印一些关键log到本地日志中
 - (void)apiLog:(NSString *)log;
 
 @end
 
-void TUIVoiceRoomLog(NSString *format, ...){
+void tuiVoiceRoomLog(NSString *format, ...){
     if (!format || ![format isKindOfClass:[NSString class]] || format.length == 0) {
         return;
     }

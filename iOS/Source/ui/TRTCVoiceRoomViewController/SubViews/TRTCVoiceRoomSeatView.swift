@@ -9,7 +9,6 @@ import UIKit
 import TXAppBasic
 import SnapKit
 
-// 设置字号和透明度的
 enum TRTCSeatState {
     case cellSeatEmpty
     case cellSeatFull
@@ -17,7 +16,6 @@ enum TRTCSeatState {
     case masterSeatFull
 }
 
-// 需要设置合理的高度和宽度获得正常的显示效果(高度越高，name和avatar之间的间距越大)
 class TRTCVoiceRoomSeatView: UIView {
     private var isViewReady: Bool = false
     private var isGetBounds: Bool = false
@@ -60,7 +58,7 @@ class TRTCVoiceRoomSeatView: UIView {
     let avatarImageView: UIImageView = {
         let imageView = UIImageView.init(frame: .zero)
         imageView.contentMode = .scaleAspectFit
-        imageView.image = UIImage.init(named: "voiceroom_placeholder_avatar", in: VoiceRoomBundle(), compatibleWith: nil)
+        imageView.image = UIImage.init(named: "voiceroom_placeholder_avatar", in: voiceRoomBundle(), compatibleWith: nil)
         imageView.layer.masksToBounds = true
         return imageView
     }()
@@ -68,7 +66,7 @@ class TRTCVoiceRoomSeatView: UIView {
     let muteImageView: UIImageView = {
         let imageView = UIImageView.init(frame: .zero)
         imageView.contentMode = .scaleAspectFit
-        imageView.image = UIImage.init(named: "audience_voice_off", in: VoiceRoomBundle(), compatibleWith: nil)
+        imageView.image = UIImage.init(named: "audience_voice_off", in: voiceRoomBundle(), compatibleWith: nil)
         imageView.isHidden = true
         return imageView
     }()
@@ -85,15 +83,14 @@ class TRTCVoiceRoomSeatView: UIView {
         return label
     }()
     
-    // MARK: - 视图生命周期函数
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard !isViewReady else {
             return
         }
         isViewReady = true
-        constructViewHierarchy() // 视图层级布局
-        activateConstraints() // 生成约束（此时有可能拿不到父视图正确的frame）
+        constructViewHierarchy()
+        activateConstraints()
     }
 
     func setupStyle() {
@@ -101,7 +98,6 @@ class TRTCVoiceRoomSeatView: UIView {
     }
     
     func constructViewHierarchy() {
-        /// 此方法内只做add子视图操作
         addSubview(avatarImageView)
         addSubview(muteImageView)
         addSubview(nameLabel)
@@ -109,7 +105,6 @@ class TRTCVoiceRoomSeatView: UIView {
     }
 
     func activateConstraints() {
-        /// 此方法内只给子视图做布局,使用:AutoLayout布局
         avatarImageView.snp.makeConstraints { (make) in
             make.top.centerX.width.equalToSuperview()
             make.height.equalTo(avatarImageView.snp.width)
@@ -127,8 +122,6 @@ class TRTCVoiceRoomSeatView: UIView {
         }
     }
     
-    /// 如果在TableCell或者CollectionCell嵌套使用，需在[cell prepareForReuse]调用此方法
-    ///  - Note 重置页面视图状态
     func prepareForReuse() {
         avatarImageView.kf.cancelDownloadTask()
         avatarImageView.image = nil;
@@ -138,7 +131,7 @@ class TRTCVoiceRoomSeatView: UIView {
     }
 
     func bindInteraction() {
-        /// 此方法负责做viewModel和视图的绑定操作
+        
     }
     
     func isMute(userId: String, map: [String:Bool]) -> Bool {
@@ -150,8 +143,7 @@ class TRTCVoiceRoomSeatView: UIView {
     
     func setSeatInfo(model: SeatInfoModel, userMuteMap: [String:Bool]) {
         if model.isClosed {
-            // close 状态
-            avatarImageView.image = UIImage.init(named: "room_lockseat", in: VoiceRoomBundle(), compatibleWith: nil)
+            avatarImageView.image = UIImage.init(named: "room_lockseat", in: voiceRoomBundle(), compatibleWith: nil)
             nameLabel.text = ""//.lockedText
             speakView.isHidden = true
             muteImageView.isHidden = true
@@ -167,9 +159,8 @@ class TRTCVoiceRoomSeatView: UIView {
         }
         
         if model.isUsed {
-            // 有人
             if let userSeatInfo = model.seatUser {
-                let placeholder = UIImage.init(named: "avatar2_100", in: VoiceRoomBundle(), compatibleWith: nil)
+                let placeholder = UIImage.init(named: "avatar2_100", in: voiceRoomBundle(), compatibleWith: nil)
                 if userSeatInfo.userAvatar.count > 0, let avatarURL = URL.init(string: userSeatInfo.userAvatar) {
                     avatarImageView.kf.setImage(with: avatarURL, placeholder: placeholder)
                 } else {
@@ -178,8 +169,7 @@ class TRTCVoiceRoomSeatView: UIView {
                 nameLabel.text = userSeatInfo.userName
             }
         } else {
-            // 无人
-            avatarImageView.image = UIImage.init(named: "Servingwheat", in: VoiceRoomBundle(), compatibleWith: nil)
+            avatarImageView.image = UIImage.init(named: "Servingwheat", in: voiceRoomBundle(), compatibleWith: nil)
             nameLabel.text = ""
                 //model.isOwner ? .inviteHandsupText : .handsupText
         }
@@ -221,9 +211,9 @@ extension TRTCVoiceRoomSeatView {
 
 /// MARK: - internationalization string
 fileprivate extension String {
-    static let handsupText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.presshandsup")
-    static let lockedText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.islocked")
-    static let inviteHandsupText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.invitehandsup")
+    static let handsupText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.presshandsup")
+    static let lockedText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.islocked")
+    static let inviteHandsupText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.invitehandsup")
 }
 
 

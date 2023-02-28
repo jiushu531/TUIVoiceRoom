@@ -32,7 +32,7 @@ class TRTCVoiceRoomTipsWelcomCell: UITableViewCell {
         let label = UILabel(frame: .zero)
         label.numberOfLines = 0
         let urlStr = TRTCVoiceRoomTipsWelcomCell.urlText
-        let totalStr = LocalizeReplaceXX(.welcomeText, urlStr)
+        let totalStr = localizeReplaceXX(.welcomeText, urlStr)
         let urlColor = UIColor(hex: "0063FF") ?? UIColor.blue
         let totalRange = NSRange(location: 0, length: totalStr.count)
         var urlRange = totalRange
@@ -151,7 +151,6 @@ class TRTCVoiceRoomTipsTableCell: UITableViewCell {
     }
 
     func constructViewHierarchy() {
-        /// 此方法内只做add子视图操作
         contentView.addSubview(containerView)
         containerView.addSubview(contentLabel)
         containerView.addSubview(acceptButton)
@@ -196,7 +195,7 @@ class TRTCVoiceRoomTipsTableCell: UITableViewCell {
             var textInfo = "\(model.content)"
             if model.userName.count > 0 {
                 if model.content.contains("xxx") {
-                    textInfo = LocalizeReplaceXX(model.content, model.userName)
+                    textInfo = localizeReplaceXX(model.content, model.userName)
                 }
                 else {
                     textInfo = "\(model.userName):\(model.content)"
@@ -218,7 +217,7 @@ class TRTCVoiceRoomTipsTableCell: UITableViewCell {
         else if model.type == MsgEntity.TYPE_AGREED {
             var textInfo = "\(model.content)"
             if model.content.contains("xxx") {
-                textInfo = LocalizeReplaceXX(model.content, model.userName)
+                textInfo = localizeReplaceXX(model.content, model.userName)
             }
             else {
                 textInfo = "\(model.userName):\(model.content)"
@@ -232,7 +231,7 @@ class TRTCVoiceRoomTipsTableCell: UITableViewCell {
         } else {
             var textInfo = "\(model.content)"
             if model.content.contains("xxx") {
-                textInfo = LocalizeReplaceXX(model.content, model.userName)
+                textInfo = localizeReplaceXX(model.content, model.userName)
             }
             else {
                 textInfo = "\(model.userName):\(model.content)"
@@ -269,7 +268,6 @@ class TRTCVoiceRoomTipsTableCell: UITableViewCell {
     func updateCell() {
         if self.acceptAction != nil {
             acceptButton.isHidden = false
-            // 重新布局
             contentLabel.snp.remakeConstraints { (make) in
                 make.left.equalToSuperview().offset(16)
                 make.right.equalToSuperview().offset(-80)
@@ -294,6 +292,6 @@ class TRTCVoiceRoomTipsTableCell: UITableViewCell {
 
 /// MARK: - internationalization string
 fileprivate extension String {
-    static let acceptText = VoiceRoomLocalize("Demo.TRTC.LiveRoom.accept")
-    static let welcomeText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.welcome")
+    static let acceptText = voiceRoomLocalize("Demo.TRTC.LiveRoom.accept")
+    static let welcomeText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.welcome")
 }

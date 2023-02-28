@@ -44,7 +44,6 @@ class TRTCVoiceRoomSeatCell: UICollectionViewCell {
     
     override func prepareForReuse() {
         super.prepareForReuse()
-        // Cell 即将被重用，UI状态需重置
         seatView.prepareForReuse()
     }
     
@@ -55,11 +54,11 @@ class TRTCVoiceRoomSeatCell: UICollectionViewCell {
     func setCell(_ type: TRTCVoiceRoomSeatCellType, _ model: SeatInfoModel) {
         switch type {
         case .add:
-            seatView.avatarImageView.image = UIImage(named: "add", in: VoiceRoomBundle(), compatibleWith: nil)
+            seatView.avatarImageView.image = UIImage(named: "add", in: voiceRoomBundle(), compatibleWith: nil)
             seatView.nameLabel.text = ""
             break
         case .lock:
-            seatView.avatarImageView.image = UIImage(named: "lock", in: VoiceRoomBundle(), compatibleWith: nil)
+            seatView.avatarImageView.image = UIImage(named: "lock", in: voiceRoomBundle(), compatibleWith: nil)
             seatView.nameLabel.text = ""
             break
         default:

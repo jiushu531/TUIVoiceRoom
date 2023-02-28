@@ -63,8 +63,8 @@ class TRTCAudienceListView: UIView {
             return
         }
         isViewReady = true
-        constructViewHierarchy() // 视图层级布局
-        activateConstraints() // 生成约束（此时有可能拿不到父视图正确的frame）
+        constructViewHierarchy()
+        activateConstraints()
     }
     
     deinit {
@@ -72,7 +72,6 @@ class TRTCAudienceListView: UIView {
     }
 
     func constructViewHierarchy() {
-        /// 此方法内只做add子视图操作
         addSubview(container)
         container.addSubview(titleContainer)
         titleContainer.addSubview(titleLabel)
@@ -81,7 +80,6 @@ class TRTCAudienceListView: UIView {
     }
 
     func activateConstraints() {
-        /// 此方法内只给子视图做布局,使用:AutoLayout布局
         container.snp.makeConstraints { (make) in
             make.bottom.left.right.equalToSuperview()
             make.height.equalTo(418)
@@ -104,7 +102,6 @@ class TRTCAudienceListView: UIView {
     }
 
     func bindInteraction() {
-        /// 此方法负责做viewModel和视图的绑定操作
         closeButton.addTarget(self, action: #selector(hide), for: .touchUpInside)
         tableView.delegate = self
         tableView.dataSource = self
@@ -145,8 +142,8 @@ extension TRTCAudienceListView: UITableViewDataSource {
 
 /// MARK: - internationalization string
 fileprivate extension String {
-    static let closeText = VoiceRoomLocalize("Demo.TRTC.Salon.close")
-    static let inviteHandsupText = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.invitehandsup")
+    static let closeText = voiceRoomLocalize("Demo.TRTC.Salon.close")
+    static let inviteHandsupText = voiceRoomLocalize("Demo.TRTC.VoiceRoom.invitehandsup")
 }
 
 

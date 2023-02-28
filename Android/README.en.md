@@ -1,15 +1,15 @@
 # Quick Run of TUIVoiceRoom Demo for Android
 _[中文](README.md) | English_
 
-This document describes how to quickly run the TUIVoiceRoom demo project to make a high-quality audio/video chat. For more information on the TUIVoiceRoom component connection process, see **[Integrating TUIVoiceRoom (Android)](https://cloud.tencent.com/document/product/647/45737)**.
+This document describes how to quickly run the TUIVoiceRoom demo project to make a high-quality audio/video chat. For more information on the TUIVoiceRoom component connection process, see **[Integrating TUIVoiceRoom (Android)](https://www.tencentcloud.com/document/product/647/37286)**.
 
 ## Directory Structure
 
 ```
 TUIVoiceRoom
-├─ App          // Main panel, which provides entries of various scenarios
-├─ Debug        // Debugging code
-└─ Source       // Video meeting business logic
+├─ app           // Main panel, which provides entries of various scenarios
+├─ debug         // Debugging code
+└─ tuivoicerooom // Integrating audio chat business logic
 ```
 
 ## Environment Requirements
@@ -25,13 +25,13 @@ TUIVoiceRoom
 3. On the application information page, note down the `SDKAppID` and key as shown below:
     <img src="https://qcloudimg.tencent-cloud.cn/raw/bea06852e22a33c77cb41d287cac25db.png" width="900">
 
->! This feature uses two basic PaaS services of Tencent Cloud: [TRTC](https://cloud.tencent.com/document/product/647/16788) and [IM](https://cloud.tencent.com/document/product/269). When you activate TRTC, IM will be activated automatically. IM is a value-added service. See [Pricing](https://cloud.tencent.com/document/product/269/11673) for its billing details.
+>! This feature uses two basic PaaS services of Tencent Cloud: [TRTC](https://www.tencentcloud.com/document/product/647/35078) and [IM](https://www.tencentcloud.com/document/product/1047/33513). When you activate TRTC, IM will be activated automatically. IM is a value-added service.
 
 
 [](id:ui.step2)
 ### Step 2. Download the source code and configure the project
 1. Clone or directly download the source code in the repository. **Feel free to star our project if you like it.**
-2. Find and open the `Android/Debug/src/main/java/com/tencent/liteav/debug/GenerateTestUserSig.java` file.
+2. Find and open the `Android/debug/src/main/java/com/tencent/liteav/debug/GenerateTestUserSig.java` file.
 3. Set parameters in `GenerateTestUserSig.java`:
 	<img src="https://main.qcloudimg.com/raw/f9b23b8632058a75b78d1f6fdcdca7da.png" width="900">
 	- SDKAPPID: A placeholder by default. Set it to the `SDKAppID` that you noted down in step 1.
@@ -51,19 +51,15 @@ Note: You need to prepare at least two devices to try out TUIVoiceRoom. Here, us
 - Step 3: Enter a room subject and click **Start**.
 - Step 4: Enter the room.
 
-| Step 1 | Step 2 | Step 3 | Step 4 |
-|---------|---------|---------|---------|
-| <img src="https://liteav.sdk.qcloud.com/doc/res/trtc/picture/zh-cn/user_a.png" width="250"> | <img src="https://liteav.sdk.qcloud.com/doc/res/trtc/picture/zh-cn/tuivoiceroom_create_room.png" width="250"> | <img src="https://qcloudimg.tencent-cloud.cn/raw/d974a54fa71b221ff342e9789d6e125a.png" width="250"> |<img src="https://qcloudimg.tencent-cloud.cn/raw/b2d8de0412d5378a8b269d277338902d.jpg" width="250"> |
-
 **Device B (userId: 222)**
 
 - Step 1: Enter the username (which must be unique), such as `222`.
 - Step 2: Click **Enter Room** and enter the ID of the room created by use A (the room ID that you noted down in step 4 on device A) to enter the room.
 
-| Step 1 | Step 2 |
-|---------|---------|
-| <img src="https://liteav.sdk.qcloud.com/doc/res/trtc/picture/zh-cn/user_b.png" width="320"/> | <img src="https://liteav.sdk.qcloud.com/doc/res/trtc/picture/zh-cn/tuivoiceroom_enter_room.png" width="320"/> |
-## FAQs
 
-- [FAQs About TUI Scenario-Specific Solution](https://cloud.tencent.com/developer/article/1952880)
-- If you have any questions or feedback, feel free to [contact us](https://intl.cloud.tencent.com/contact-us).
+## Have any questions?
+Welcome to join our Telegram Group to communicate with our professional engineers! We are more than happy to hear from you~
+Click to join: https://t.me/+EPk6TMZEZMM5OGY1
+Or scan the QR code
+
+<img src="https://qcloudimg.tencent-cloud.cn/raw/9c67ed5746575e256b81ce5a60216c5a.jpg" width="320"/>

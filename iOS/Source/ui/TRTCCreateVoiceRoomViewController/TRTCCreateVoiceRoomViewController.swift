@@ -9,7 +9,6 @@
 import UIKit
 
 public class TRTCCreateVoiceRoomViewController: UIViewController {
-    // 依赖管理者
     let dependencyContainer: TRTCVoiceRoomEnteryControl
     
     init(dependencyContainer: TRTCVoiceRoomEnteryControl) {
@@ -32,7 +31,7 @@ public class TRTCCreateVoiceRoomViewController: UIViewController {
         title = .controllerTitle
         
         let backBtn = UIButton(type: .custom)
-        backBtn.setImage(UIImage(named: "navigationbar_back", in: VoiceRoomBundle(), compatibleWith: nil), for: .normal)
+        backBtn.setImage(UIImage(named: "navigationbar_back", in: voiceRoomBundle(), compatibleWith: nil), for: .normal)
         backBtn.addTarget(self, action: #selector(cancel), for: .touchUpInside)
         backBtn.sizeToFit()
         let backItem = UIBarButtonItem(customView: backBtn)
@@ -54,13 +53,12 @@ public class TRTCCreateVoiceRoomViewController: UIViewController {
         
     }
     
-    /// 取消
     @objc func cancel() {
         navigationController?.popViewController(animated: true)
     }
 }
 
 private extension String {
-    static let controllerTitle = VoiceRoomLocalize("Demo.TRTC.VoiceRoom.createvoicechatroom")
+    static let controllerTitle = voiceRoomLocalize("Demo.TRTC.VoiceRoom.createvoicechatroom")
 }
 
